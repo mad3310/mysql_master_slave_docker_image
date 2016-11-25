@@ -1,6 +1,13 @@
+#mysql_master_slave
 
-##example
-####master
+##Purpose
+本dockerfile将搭建一个mysql主从环境，并使用keepalived做数据库的高可用。
+
+
+
+##Example
+
+###Master
 ```Bash
 docker run -i -t --rm --privileged -n --memory="4294967296" -h mysql_master -v /srv/mcluster -v /data/mcluster_data/mysql_master:/data/mcluster_data \
 --env "IP=10.183.82.100" \
@@ -17,7 +24,8 @@ docker run -i -t --rm --privileged -n --memory="4294967296" -h mysql_master -v /
 --env "VIP=10.183.82.102" \
 --name mysql_master dockerapp.et.letv.com/mcluster/letv_mysql_master_slave:0.0.1
 ```
-####master
+
+###Mlave
 ```Bash
 docker run -i -t --rm --privileged -n --memory="4294967296" -h mysql_slave -v /srv/mcluster -v /data/mcluster_data/mysql_slave:/data/mcluster_data \
 --env "IP=10.183.82.101" \
@@ -36,3 +44,4 @@ docker run -i -t --rm --privileged -n --memory="4294967296" -h mysql_slave -v /s
 --env "VIP=10.183.82.102" \
 --name mysql_slave dockerapp.et.letv.com/mcluster/letv_mysql_master_slave:0.0.1
 ```
+
