@@ -1,7 +1,7 @@
-#mysql_master_slave
+# mysql_master_slave
 
 ##Purpose
-±¾dockerfile½«´î½¨Ò»¸ömysqlÖ÷´Ó»·¾³£¬²¢Ê¹ÓÃkeepalived×öÊı¾İ¿âµÄ¸ß¿ÉÓÃ¡£
+æœ¬dockerfileå°†æ­å»ºä¸€ä¸ªmysqlä¸»ä»ç¯å¢ƒï¼Œå¹¶ä½¿ç”¨keepalivedåšæ•°æ®åº“çš„é«˜å¯ç”¨ã€‚
 
 
 
