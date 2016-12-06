@@ -53,7 +53,7 @@ set -e
 #public param
 VOLUME_HOME="/srv/mcluster"
 CONF_FILE="/opt/letv/mysql/etc/my.cnf"
-LOG="/var/log/mysql/mysql.log"
+LOG="/var/log/mysql.log"
 INSTALL_DIR="/opt/letv/mysql"
 
 # public set param
@@ -70,19 +70,20 @@ echo $PATH
 
 # slave set param
 #REPLICATION_SLAVE='true'
-#MYSQL_PORT_3306_TCP_ADDR='10.185.81.103'
-#MYSQL_PORT_3306_TCP_PORT='3306'
-#MYSQL_ENV_REPLICATION_USER='rep'
-#MYSQL_ENV_REPLICATION_PASS='rep'
+#MASTER_PORT_3306_TCP_ADDR='10.185.81.103'
+#MASTER_PORT_3306_TCP_PORT='3306'
+#MASTER_ENV_REPLICATION_USER='rep'
+#MASTER_ENV_REPLICATION_PASS='rep'
+
+# replication method : default or gtid
+#REPLICA_METHOD=default
 
 # Set permission of config file
 chmod 644 ${CONF_FILE}
 
 StartMySQL ()
 {
-#    /usr/bin/mysqld_safe ${EXTRA_OPTS} > /dev/null 2>&1 &
     /etc/init.d/mysql start > /dev/null 2>&1 &
-#    /etc/init.d/mysql start &
     # Time out in 1 minute
     LOOP_LIMIT=60
     for (( i=0 ; ; i++ )); do
@@ -99,14 +100,8 @@ StartMySQL ()
 
 CreateMySQLUser()
 {
-    if [ "$MYSQL_PASS" = "**Random**" ]; then
-        unset MYSQL_PASS
-    fi
-
-    PASS=${MYSQL_PASS:-$(pwgen -s 12 1)}
-    _word=$( [ ${MYSQL_PASS} ] && echo "preset" || echo "random" )
-    echo "=> Creating MySQL user ${MONITOR_USER} with ${_word} password"
-    mysql -uroot -e "CREATE USER '${MONITOR_USER}'@'%' IDENTIFIED BY '$PASS'"
+    echo "=> Creating MySQL monitor user ${MONITOR_USER} "
+    mysql -uroot -e "CREATE USER '${MONITOR_USER}'@'%' IDENTIFIED BY '${MONITOR_PASSWORD}'"
     mysql -uroot -e "GRANT ALL PRIVILEGES ON ${ON_CREATE_MONITOR_DB}.* TO ${MONITOR_USER}@'%' WITH GRANT OPTION"
     echo "=> Done!"
     echo "========================================================================"
@@ -117,6 +112,16 @@ CreateMySQLUser()
     echo "Please remember to change the above password as soon as possible!"
     echo "MySQL user 'root' has no password but only allows local connections"
     echo "========================================================================"
+}
+
+CreateDumpuser()
+{
+     mysql -uroot -e "GRANT SELECT, LOCK TABLES , EVENT ON *.* TO 'dumpuser'@'`echo $IP | cut -d. -f1,2`.%.%'  IDENTIFIED BY '${MONITOR_PASSWORD}';" 
+}
+
+DropDumpuser()
+{
+     mysql -uroot -e "drop user 'dumpuser'@'`echo $IP | cut -d. -f1,2`.%.%';"
 }
 
 OnCreateDB()
@@ -130,17 +135,30 @@ OnCreateDB()
     fi
 }
 
+DumpData_default()
+{
+    if [ ! -f /srv/mcluster/dump_db_full.sql ]; then
+        echo "=> dump master data"
+        mysqldump --opt --single-transaction --master-data=1 --all-databases --set-gtid-purged=off --host=${MASTER_PORT_3306_TCP_ADDR} --port=3306 --user=dumpuser --password=${MONITOR_PASSWORD} >/srv/mcluster/dump_db_full.sql
+    fi
+}
+
+DumpData_gtid()
+{
+    if [ ! -f /srv/mcluster/dump_db_full.sql ]; then
+        echo "=> dump master data"
+        mysqldump --all-databases --single-transaction --triggers --routines --events --host=${MASTER_PORT_3306_TCP_ADDR} --port=3306 --user=dumpuser --password=${MONITOR_PASSWORD} >/srv/mcluster/dump_db_full.sql
+    fi
+}
+
 ImportSql()
 {
-    for FILE in ${STARTUP_SQL}; do
-        echo "=> Importing SQL file ${FILE}"
-#        if [ "$ON_CREATE_MONITOR_DB" ]; then
-#            mysql -uroot "$ON_CREATE_MONITOR_DB" < "${FILE}"
-#        else
-#            mysql -uroot < "${FILE}"
-#        fi
-        mysql -uroot < "${FILE}"
-    done
+    if [ ! -f /var/lib/mysql/is_initdb ]; then                                                                                                                                                                 
+         echo "=> Initializing slave DB with"                                                                                                                                                                    
+         echo '=> Importing SQL file /srv/mcluster/dump_db_full.sql'
+         mysql -uroot < /srv/mcluster/dump_db_full.sql
+         touch /var/lib/mysql/is_initdb                                                                                                                                                                          
+    fi 
 }
 
 # Main
@@ -154,9 +172,15 @@ fi
 
 # Initialize empty data volume and create MySQL user
 if [[ ! -d ${VOLUME_HOME}/mysql ]]; then
-    echo "=> An empty or uninitialized MySQL volume is detected in $VOLUME_HOME"
+    echo "=> An empty or uninitialized MySQL volume is detected in $VOLUME_HOME/mysql"
     echo "=> Installing MySQL ..."
-    ${INSTALL_DIR}/scripts/mysql_install_db --basedir=${INSTALL_DIR} --user=mysql --datadir=${VOLUME_HOME}/mysql || exit 1
+    # mysql5.6
+    #${INSTALL_DIR}/scripts/mysql_install_db --basedir=${INSTALL_DIR} --user=mysql --datadir=${VOLUME_HOME}/mysql || exit 1
+    # mysql5.7
+    mkdir -p ${VOLUME_HOME}/mysql
+    chown -R mysql:mysql ${VOLUME_HOME}/mysql
+echo "${INSTALL_DIR}/bin/mysqld --initialize-insecure --basedir=${INSTALL_DIR} --user=mysql --basedir=${INSTALL_DIR} --datadir=${VOLUME_HOME}/mysql "
+    ${INSTALL_DIR}/bin/mysqld --initialize-insecure --basedir=${INSTALL_DIR} --user=mysql --basedir=${INSTALL_DIR} --datadir=${VOLUME_HOME}/mysql || exit 1
     touch /var/lib/mysql/.EMPTY_DB
     echo "=> Done!"
 else
@@ -171,6 +195,11 @@ if [ -n "${REPLICATION_MASTER}" ]; then
         echo "=> Writting configuration file '${CONF_FILE}' with server-id=${RAND}"
         sed -i "s/^#server-id.*/server-id = ${RAND}/" ${CONF_FILE}
         sed -i "s/^#log-bin.*/log-bin = mysql-bin/" ${CONF_FILE}
+        if [[ "${REPLICA_METHOD}" = 'gtid' ]]; then
+            sed -i "s/^#gtid-mode.*/gtid-mode = on/" ${CONF_FILE}
+            sed -i "s/^#enforce-gtid-consistency.*/enforce-gtid-consistency=true/" ${CONF_FILE}
+            sed -i "s/^#log-slave-updates.*/log-slave-updates=true/" ${CONF_FILE}
+        fi
         touch /replication_set.1
     else
         echo "=> MySQL replication master already configured, skip"
@@ -180,12 +209,17 @@ fi
 # Set MySQL REPLICATION - SLAVE
 if [ -n "${REPLICATION_SLAVE}" ]; then
     echo "=> Configuring MySQL replication as slave (1/2) ..."
-    if [ -n "${MYSQL_PORT_3306_TCP_ADDR}" ] && [ -n "${MYSQL_PORT_3306_TCP_PORT}" ]; then
+    if [ -n "${MASTER_PORT_3306_TCP_ADDR}" ] && [ -n "${MASTER_PORT_3306_TCP_PORT}" ]; then
         if [ ! -f /replication_set.1 ]; then
             RAND="$(date +%s | rev | cut -c 1-2)$(echo ${RANDOM})"
             echo "=> Writting configuration file '${CONF_FILE}' with server-id=${RAND}"
             sed -i "s/^#server-id.*/server-id = ${RAND}/" ${CONF_FILE}
             sed -i "s/^#log-bin.*/log-bin = mysql-bin/" ${CONF_FILE}
+            if [[ "${REPLICA_METHOD}" = 'gtid' ]]; then
+                sed -i "s/^#gtid-mode.*/gtid-mode = on/" ${CONF_FILE}
+                sed -i "s/^#enforce-gtid-consistency.*/enforce-gtid-consistency=true/" ${CONF_FILE}
+                sed -i "s/^#log-slave-updates.*/log-slave-updates=true/" ${CONF_FILE}
+            fi
             touch /replication_set.1
         else
             echo "=> MySQL replication slave already configured, skip"
@@ -208,23 +242,14 @@ if [ -f /var/lib/mysql/.EMPTY_DB ]; then
     rm /var/lib/mysql/.EMPTY_DB
 fi
 
-
-# Import Startup SQL
-if [ -n "${STARTUP_SQL}" ]; then
-    if [ ! -f /sql_imported ]; then
-        echo "=> Initializing DB with ${STARTUP_SQL}"
-        ImportSql
-        touch /sql_imported
-    fi
-fi
-
 # Set MySQL REPLICATION - MASTER
 if [ -n "${REPLICATION_MASTER}" ]; then
     echo "=> Configuring MySQL replication as master (2/2) ..."
     if [ ! -f /replication_set.2 ]; then
-        echo "=> Creating a log user ${REPLICATION_USER}:${REPLICATION_PASS}"
+        echo "=> Creating user ${REPLICATION_USER}:${REPLICATION_PASS}"
         mysql -uroot -e "CREATE USER '${REPLICATION_USER}'@'%' IDENTIFIED BY '${REPLICATION_PASS}'"
         mysql -uroot -e "GRANT REPLICATION SLAVE ON *.* TO '${REPLICATION_USER}'@'%'"
+        #CreateDumpuser
         mysql -uroot -e "reset master"
         echo "=> Done!"
         touch /replication_set.2
@@ -236,10 +261,27 @@ fi
 # Set MySQL REPLICATION - SLAVE
 if [ -n "${REPLICATION_SLAVE}" ]; then
     echo "=> Configuring MySQL replication as slave (2/2) ..."
-    if [ -n "${MYSQL_PORT_3306_TCP_ADDR}" ] && [ -n "${MYSQL_PORT_3306_TCP_PORT}" ]; then
+    if [ -n "${MASTER_PORT_3306_TCP_ADDR}" ] && [ -n "${MASTER_PORT_3306_TCP_PORT}" ]; then
         if [ ! -f /replication_set.2 ]; then
+            # dump master data
+            #if [[ "${REPLICA_METHOD}" = 'default' ]]; then
+            #    DumpData_default                                                                                                                                                                                       
+            #fi
+            #if [[ "${REPLICA_METHOD}" = 'gtid' ]]; then
+            #    DumpData_gtid
+            #fi
+            # reset master
+            mysql -uroot -e 'reset master'
+            # Import master data
+            #ImportSql
             echo "=> Setting master connection info on slave"
-            mysql -uroot -e "CHANGE MASTER TO MASTER_HOST='${MYSQL_PORT_3306_TCP_ADDR}',MASTER_USER='${MYSQL_ENV_REPLICATION_USER}',MASTER_PASSWORD='${MYSQL_ENV_REPLICATION_PASS}',MASTER_PORT=${MYSQL_PORT_3306_TCP_PORT}, MASTER_CONNECT_RETRY=30"
+            if [[ "${REPLICA_METHOD}" = 'default' ]]; then
+                mysql -uroot -e "CHANGE MASTER TO MASTER_HOST='${MASTER_PORT_3306_TCP_ADDR}',MASTER_USER='${MASTER_ENV_REPLICATION_USER}',MASTER_PASSWORD='${MASTER_ENV_REPLICATION_PASS}',MASTER_PORT=${MASTER_PORT_3306_TCP_PORT}, MASTER_CONNECT_RETRY=30"
+            fi
+            if [[ "${REPLICA_METHOD}" = 'gtid' ]]; then
+                mysql -uroot -e "CHANGE MASTER TO MASTER_HOST='${MASTER_PORT_3306_TCP_ADDR}',MASTER_USER='${MASTER_ENV_REPLICATION_USER}',MASTER_PASSWORD='${MASTER_ENV_REPLICATION_PASS}',MASTER_PORT=${MASTER_PORT_3306_TCP_PORT}, MASTER_AUTO_POSITION = 1"
+            fi
+            mysql -uroot -e "set global read_only=on"
             mysql -uroot -e "start slave"
             echo "=> Done!"
             touch /replication_set.2
@@ -252,4 +294,5 @@ if [ -n "${REPLICATION_SLAVE}" ]; then
     fi
 fi
 
+source /etc/profile
 #fg

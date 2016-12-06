@@ -1,7 +1,6 @@
 FROM letv:centos6
 MAINTAINER Qiang Gao <gaoqiang3@le.com>
 
-
 # install kernel modules for keepalived
 #RUN yum install kernel-2.6.32-926.504.30.3.letv.el6 -y
 
@@ -17,15 +16,15 @@ RUN yum clean all
 
 # install yum
 #RUN yum install -y perl-DBD-MySQL perl-DBI perl-IO-Socket-SSL.noarch socat nc libev  perl-DBD-MySQL perl-DBI numactl pwgen
-RUN yum install pwgen -y
 RUN yum install vim wget mail -y
-RUN /usr/bin/wget --no-check-certificate  http://s3.lecloud.com/matrix/plugins/MySQL/percona-server-5.6.33-1.el6.x86_64.rpm
-RUN yum localinstall percona-server-5.6.33-1.el6.x86_64.rpm -y
+RUN /usr/bin/wget --no-check-certificate https://s3.lecloud.com/matrix/plugins/MySQL/percona-server-5.7.15-1.el6.x86_64.rpm 
+RUN yum localinstall percona-server-5.7.15-1.el6.x86_64.rpm -y
+RUN rm -rf percona-server-5.7.15-1.el6.x86_64.rpm
 
 # install pt tools
-RUN /usr/bin/wget --no-check-certificate https://10.154.29.92:443/v1/AUTH_gaoqiang3/oss/PXC56/percona-xtrabackup-24-2.4.3-1.el6.x86_64.rpm
+RUN /usr/bin/wget --no-check-certificate https://s3.lecloud.com/matrix/plugins/MySQL/percona-xtrabackup-24-2.4.3-1.el6.x86_64.rpm
 RUN yum localinstall percona-xtrabackup-24-2.4.3-1.el6.x86_64.rpm -y
-RUN /usr/bin/wget --no-check-certificate https://10.154.29.92:443/v1/AUTH_gaoqiang3/oss/PXC56/percona-toolkit-2.2.19-1.noarch.rpm
+RUN /usr/bin/wget --no-check-certificate https://s3.lecloud.com/matrix/plugins/MySQL/percona-toolkit-2.2.19-1.noarch.rpm
 RUN yum localinstall percona-toolkit-2.2.19-1.noarch.rpm -y
 RUN rm -rf percona-xtrabackup-24-2.4.3-1.el6.x86_64.rpm
 RUN rm -rf percona-toolkit-2.2.19-1.noarch.rpm
@@ -47,14 +46,6 @@ RUN chmod 755 /usr/local/init/mysql_docker_init.sh
 RUN yum install keepalived -y
 COPY ./init/keepalived_init.sh /usr/local/init/keepalived_init.sh
 RUN chmod 755 /usr/local/init/keepalived_init.sh
-
-ENV MONITOR_USER=monitor \
-    MYSQL_PASS=**Random** \
-    ON_CREATE_MONITOR_DB=**False** \
-    REPLICATION_MASTER=**False** \
-    REPLICATION_SLAVE=**False** \
-    REPLICATION_USER=rep \
-    REPLICATION_PASS=rep
 
 EXPOSE 3306 4567 4568 4569 2181 2888 3888
 ENTRYPOINT /usr/local/init/mysql_docker_init.sh && /usr/local/init/keepalived_init.sh && /bin/bash
