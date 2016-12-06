@@ -47,3 +47,27 @@ docker run -i -t --rm --privileged -n --memory="4294967296" -h mysql_slave -v /s
 --name mysql_slave dockerapp.et.letv.com/mcluster/letv_mysql_master_slave:0.0.2
 ```
 
+## Other
+SPECS文件里定为perconal server 5.6定rpmbuild文件，perconal server 5.7的只需要修过版本号和cmake命令即可
+```Bash
+cmake  \
+-DCMAKE_INSTALL_PREFIX=/opt/letv/mysql \
+-DMYSQL_DATADIR=/srv/mcluster/mysql \
+-DSYSCONFDIR=/opt/letv/mysql/etc \
+-DMYSQL_UNIX_ADDR=/var/lib/mysql/mysql.sock \
+-DWITH_MYISAM_STORAGE_ENGINE=1 \
+-DWITH_INNOBASE_STORAGE_ENGINE=1 \
+-DWITH_ARCHIVE_STORAGE_ENGINE=1 \
+-DWITH_BLACKHOLE_STORAGE_ENGINE=1 \
+-DWITH_PARTITION_STORAGE_ENGINE=1 \
+-DWITH_PERFSCHEMA_STORAGE_ENGINE=1 \
+-DWITH_FEDERATED_STORAGE_ENGINE=1 \
+-DEXTRA_CHARSETS=all \
+-DDEFAULT_CHARSET=utf8 \
+-DDEFAULT_COLLATION=utf8_general_ci \
+-DWITH_EDITLINE=bundled \
+-DENABLED_LOCAL_INFILE=1 \
+-DMYSQL_TCP_PORT=3306 \
+-DWITH_BOOST=/var/lib/boost \
+-DENABLE_DOWNLOADS=1
+```
